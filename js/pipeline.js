@@ -68,9 +68,8 @@ var Pipeline = (function () {
         var metaLines = [
           'Buildings: ' + summary.buildings,
           'Pedestrian paths: ' + summary.paths,
-          'Major streets: ' + summary.majorStreets,
-          'Minor streets: ' + summary.streets,
-          'Entrances extracted: ' + summary.entrances
+          'Street labels: ' + summary.streetLabels,
+          'Entrances: ' + summary.entrances
         ];
 
         setStageStatus(2, 'complete');
@@ -108,8 +107,7 @@ var Pipeline = (function () {
           'Vertices after: ' + s.after,
           'Reduction: ' + s.totalReduction + '%',
           '  Buildings: ' + s.byLayer.buildings.before + ' → ' + s.byLayer.buildings.after,
-          '  Paths: ' + s.byLayer.paths.before + ' → ' + s.byLayer.paths.after,
-          '  Streets: ' + s.byLayer.streets.before + ' → ' + s.byLayer.streets.after
+          '  Paths: ' + s.byLayer.paths.before + ' → ' + s.byLayer.paths.after
         ];
 
         setStageStatus(3, 'complete');

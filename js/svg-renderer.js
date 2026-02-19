@@ -1,72 +1,65 @@
 // Stage 5: SVG Renderer
 // Projects WGS84 coordinates to SVG mm space (A4 landscape: 297x210mm)
-// Linear scale with aspect-ratio-correct fit into 277x190mm usable area (10mm margins)
+// Street names placed as large text in page margins — no street lines drawn.
 
 var SVGRenderer = (function () {
 
-  var SVG_NS = 'http://www.w3.org/2000/svg';
-  var VIEWBOX_W = 297;   // A4 landscape width in mm
-  var VIEWBOX_H = 210;   // A4 landscape height in mm
-  var MARGIN = 10;       // mm
+  var SVG_NS   = 'http://www.w3.org/2000/svg';
+  var VIEWBOX_W = 297;  // A4 landscape mm
+  var VIEWBOX_H = 210;
+  // Content margins — generous so street labels have breathing room
+  var MARGIN_TOP    = 28;
+  var MARGIN_BOTTOM = 28;
+  var MARGIN_LEFT   = 22;
+  var MARGIN_RIGHT  = 22;
 
   function render(styledLayers, containerEl) {
-    // 1. Collect all features into a flat array for bbox calculation
-    var allFeatures = []
-      .concat(styledLayers.buildings || [])
-      .concat(styledLayers.paths || [])
-      .concat(styledLayers.streets || [])
-      .concat(styledLayers.entrances || []);
+    var buildings    = styledLayers.buildings    || [];
+    var paths        = styledLayers.paths        || [];
+    var entrances    = styledLayers.entrances    || [];
+    var streetLabels = styledLayers.streetLabels || [];
 
-    if (allFeatures.length === 0) {
-      console.warn('SVGRenderer: no features to render');
+    if (buildings.length === 0) {
+      console.warn('SVGRenderer: no buildings to render');
       return null;
     }
 
-    // 2. Compute bounding box [minLng, minLat, maxLng, maxLat]
-    var bbox = computeBbox(allFeatures);
-    if (!bbox) {
-      console.warn('SVGRenderer: could not compute bounding box');
-      return null;
-    }
+    // 1. Bbox from buildings only — streets don't influence the projection
+    var bbox = computeBbox(buildings);
+    if (!bbox) return null;
 
-    // 3. Build linear projection (aspect-ratio corrected)
+    // 2. Projection into usable content area
     var proj = buildProjection(bbox);
 
-    // 4. Create SVG element
+    // 3. Build SVG
     var svg = document.createElementNS(SVG_NS, 'svg');
     svg.setAttribute('xmlns', SVG_NS);
     svg.setAttribute('viewBox', '0 0 ' + VIEWBOX_W + ' ' + VIEWBOX_H);
-    svg.setAttribute('width', VIEWBOX_W + 'mm');
+    svg.setAttribute('width',  VIEWBOX_W + 'mm');
     svg.setAttribute('height', VIEWBOX_H + 'mm');
     svg.setAttribute('data-tactile-pipeline', 'cart484');
 
-    // Background rectangle
     var bg = document.createElementNS(SVG_NS, 'rect');
-    bg.setAttribute('width', VIEWBOX_W);
+    bg.setAttribute('width',  VIEWBOX_W);
     bg.setAttribute('height', VIEWBOX_H);
     bg.setAttribute('fill', '#ffffff');
     svg.appendChild(bg);
 
-    // 5. Create layer groups in z-order: streets → major streets → paths → buildings → poi → labels → legend
-    var groupBackground  = createGroup(svg, 'background',    'Minor street grid');
-    var groupMajor       = createGroup(svg, 'major-streets', 'Major streets');
-    var groupLabels      = createGroup(svg, 'street-labels', 'Street names');
-    var groupMidground   = createGroup(svg, 'midground',     'Pedestrian paths');
-    var groupForeground  = createGroup(svg, 'foreground',    'Building footprints');
-    var groupPoi         = createGroup(svg, 'poi',           'Entrances');
+    // 4. Layer groups — paths → buildings → entrances → street name labels
+    var groupMidground  = createGroup(svg, 'midground',     'Pedestrian paths');
+    var groupForeground = createGroup(svg, 'foreground',    'Building footprints');
+    var groupPoi        = createGroup(svg, 'poi',           'Entrances');
+    var groupLabels     = createGroup(svg, 'street-labels', 'Street name labels');
 
-    // 6. Render each layer
-    renderFeatures(styledLayers.streets      || [], groupBackground, proj);
-    renderFeatures(styledLayers.majorStreets || [], groupMajor,      proj);
-    renderStreetLabels(styledLayers.majorStreets || [], groupLabels, proj);
-    renderFeatures(styledLayers.paths        || [], groupMidground,  proj);
-    renderFeatures(styledLayers.buildings    || [], groupForeground, proj);
-    renderFeatures(styledLayers.entrances    || [], groupPoi,        proj);
+    renderFeatures(paths,     groupMidground,  proj);
+    renderFeatures(buildings, groupForeground, proj);
+    renderFeatures(entrances, groupPoi,        proj);
 
-    // 7. Insert into container
+    // 5. Street name labels in page margins
+    renderMarginLabels(streetLabels, groupLabels, proj);
+
     containerEl.innerHTML = '';
     containerEl.appendChild(svg);
-
     return svg;
   }
 
@@ -92,33 +85,27 @@ var SVGRenderer = (function () {
   function buildProjection(bbox) {
     var minLng = bbox[0], minLat = bbox[1], maxLng = bbox[2], maxLat = bbox[3];
 
-    var usableW = VIEWBOX_W - MARGIN * 2;
-    var usableH = VIEWBOX_H - MARGIN * 2;
+    var usableW = VIEWBOX_W - MARGIN_LEFT - MARGIN_RIGHT;
+    var usableH = VIEWBOX_H - MARGIN_TOP  - MARGIN_BOTTOM;
 
-    var lngRange = maxLng - minLng;
-    var latRange = maxLat - minLat;
+    var lngRange = maxLng - minLng || 0.001;
+    var latRange = maxLat - minLat || 0.001;
 
-    // Avoid divide-by-zero for degenerate data
-    if (lngRange === 0) lngRange = 0.001;
-    if (latRange === 0) latRange = 0.001;
+    var scale = Math.min(usableW / lngRange, usableH / latRange);
 
-    // Scale to fit while preserving aspect ratio
-    var scaleX = usableW / lngRange;
-    var scaleY = usableH / latRange;
-    var scale = Math.min(scaleX, scaleY);
-
-    // Centre the map within the usable area
     var renderedW = lngRange * scale;
     var renderedH = latRange * scale;
-    var offsetX = MARGIN + (usableW - renderedW) / 2;
-    var offsetY = MARGIN + (usableH - renderedH) / 2;
+    var offsetX = MARGIN_LEFT  + (usableW - renderedW) / 2;
+    var offsetY = MARGIN_TOP   + (usableH - renderedH) / 2;
 
     return {
-      minLng: minLng,
-      maxLat: maxLat,
-      scale: scale,
-      offsetX: offsetX,
-      offsetY: offsetY
+      minLng: minLng, maxLat: maxLat,
+      scale: scale, offsetX: offsetX, offsetY: offsetY,
+      // Content-area edges in SVG mm (used by margin label placement)
+      contentMinX: offsetX,
+      contentMaxX: offsetX + renderedW,
+      contentMinY: offsetY,
+      contentMaxY: offsetY + renderedH
     };
   }
 
@@ -276,120 +263,66 @@ var SVGRenderer = (function () {
     }
   }
 
-  // --- Street labels (major streets only) ---
+  // --- Margin label placement ---
+  // Each streetLabel feature has geometry.type=Point (centroid of the street)
+  // and properties.side = 'top'|'bottom'|'left'|'right'
+  // Labels are placed in the white space outside the building content area.
 
-  function renderStreetLabels(features, group, proj) {
-    var seen = {};
-    features.forEach(function (f) {
-      var name = f.properties && f.properties.name;
-      if (!name || seen[name]) return;
-      var geom = f.geometry;
-      if (!geom || geom.type !== 'LineString') return;
-      var coords = geom.coordinates;
-      if (coords.length < 2) return;
+  function renderMarginLabels(streetLabels, group, proj) {
+    streetLabels.forEach(function (f) {
+      var p    = f.properties || {};
+      var name = p.name;
+      var side = p.side;
+      if (!name || !side) return;
 
-      // Place label at midpoint of the longest segment
-      var midIdx = Math.floor(coords.length / 2);
-      var a = coords[midIdx - 1] || coords[0];
-      var b = coords[midIdx];
-      var pa = project(a[0], a[1], proj);
-      var pb = project(b[0], b[1], proj);
-      var mx = (pa[0] + pb[0]) / 2;
-      var my = (pa[1] + pb[1]) / 2;
+      var coords = f.geometry.coordinates;  // [lng, lat] centroid of the street
+      var pt     = project(coords[0], coords[1], proj);
 
-      // Angle of this segment
-      var angle = Math.atan2(pb[1] - pa[1], pb[0] - pa[0]) * 180 / Math.PI;
-      if (angle > 90)  angle -= 180;
-      if (angle < -90) angle += 180;
+      var x, y, anchor;
 
-      var text = document.createElementNS(SVG_NS, 'text');
-      text.setAttribute('x', mx);
-      text.setAttribute('y', my);
-      text.setAttribute('transform', 'rotate(' + angle + ',' + mx + ',' + my + ')');
-      text.setAttribute('text-anchor', 'middle');
-      text.setAttribute('dominant-baseline', 'auto');
-      text.setAttribute('font-family', 'Arial, sans-serif');
-      text.setAttribute('font-size', '2.2');
-      text.setAttribute('fill', '#444444');
-      text.setAttribute('dy', '-0.6');
-      text.textContent = name;
-      group.appendChild(text);
-      seen[name] = true;
-    });
-  }
+      switch (side) {
+        case 'top':
+          // Horizontally aligned with street centroid, vertically centred in top margin
+          x      = Math.max(MARGIN_LEFT + 5, Math.min(VIEWBOX_W - MARGIN_RIGHT - 5, pt[0]));
+          y      = (proj.contentMinY) / 2;   // halfway between page top and content top
+          anchor = 'middle';
+          break;
 
-  // --- SVG Legend (bottom-left corner) ---
+        case 'bottom':
+          x      = Math.max(MARGIN_LEFT + 5, Math.min(VIEWBOX_W - MARGIN_RIGHT - 5, pt[0]));
+          y      = proj.contentMaxY + (VIEWBOX_H - proj.contentMaxY) / 2;
+          anchor = 'middle';
+          break;
 
-  function renderLegend(svg) {
-    var g = document.createElementNS(SVG_NS, 'g');
-    g.setAttribute('id', 'legend');
-    g.setAttribute('transform', 'translate(10, 148)');
+        case 'left':
+          x      = proj.contentMinX / 2;     // halfway between page left and content left
+          y      = Math.max(MARGIN_TOP + 5, Math.min(VIEWBOX_H - MARGIN_BOTTOM - 5, pt[1]));
+          anchor = 'middle';
+          break;
 
-    // Background panel
-    var bg = document.createElementNS(SVG_NS, 'rect');
-    bg.setAttribute('x', 0);
-    bg.setAttribute('y', 0);
-    bg.setAttribute('width', 68);
-    bg.setAttribute('height', 52);
-    bg.setAttribute('fill', '#ffffff');
-    bg.setAttribute('fill-opacity', '0.92');
-    bg.setAttribute('stroke', '#cccccc');
-    bg.setAttribute('stroke-width', '0.3');
-    bg.setAttribute('rx', '1');
-    g.appendChild(bg);
+        case 'right':
+          x      = proj.contentMaxX + (VIEWBOX_W - proj.contentMaxX) / 2;
+          y      = Math.max(MARGIN_TOP + 5, Math.min(VIEWBOX_H - MARGIN_BOTTOM - 5, pt[1]));
+          anchor = 'middle';
+          break;
 
-    var title = document.createElementNS(SVG_NS, 'text');
-    title.setAttribute('x', 4);
-    title.setAttribute('y', 6);
-    title.setAttribute('font-family', 'Arial, sans-serif');
-    title.setAttribute('font-size', '2.5');
-    title.setAttribute('font-weight', 'bold');
-    title.setAttribute('fill', '#222222');
-    title.textContent = 'Legend';
-    g.appendChild(title);
-
-    var items = [
-      { label: 'Building',        color: '#1a1a1a', width: 1.2, dash: null,   dot: false },
-      { label: 'Major street',    color: '#555555', width: 1.2, dash: null,   dot: false },
-      { label: 'Minor street',    color: '#cccccc', width: 0.5, dash: null,   dot: false },
-      { label: 'Pedestrian path', color: '#256fba', width: 0.8, dash: '2 2', dot: false },
-      { label: 'Campus entrance', color: '#e05c5c', width: 0.5, dash: null,   dot: true  },
-    ];
-
-    items.forEach(function (item, i) {
-      var y = 11 + i * 8;
-
-      if (item.dot) {
-        var circle = document.createElementNS(SVG_NS, 'circle');
-        circle.setAttribute('cx', 10);
-        circle.setAttribute('cy', y + 0.5);
-        circle.setAttribute('r', 1.5);
-        circle.setAttribute('fill', item.color);
-        g.appendChild(circle);
-      } else {
-        var line = document.createElementNS(SVG_NS, 'line');
-        line.setAttribute('x1', 4);
-        line.setAttribute('y1', y + 0.5);
-        line.setAttribute('x2', 18);
-        line.setAttribute('y2', y + 0.5);
-        line.setAttribute('stroke', item.color);
-        line.setAttribute('stroke-width', item.width);
-        if (item.dash) line.setAttribute('stroke-dasharray', item.dash);
-        line.setAttribute('stroke-linecap', 'round');
-        g.appendChild(line);
+        default:
+          return;
       }
 
       var text = document.createElementNS(SVG_NS, 'text');
-      text.setAttribute('x', 22);
-      text.setAttribute('y', y + 1.5);
+      text.setAttribute('x', Math.round(x * 10) / 10);
+      text.setAttribute('y', Math.round(y * 10) / 10);
+      text.setAttribute('text-anchor', anchor);
+      text.setAttribute('dominant-baseline', 'middle');
       text.setAttribute('font-family', 'Arial, sans-serif');
-      text.setAttribute('font-size', '2.8');
-      text.setAttribute('fill', '#333333');
-      text.textContent = item.label;
-      g.appendChild(text);
+      text.setAttribute('font-size', '7');
+      text.setAttribute('font-weight', 'bold');
+      text.setAttribute('fill', '#111111');
+      text.setAttribute('data-street', name);
+      text.textContent = name;
+      group.appendChild(text);
     });
-
-    svg.appendChild(g);
   }
 
   return { render: render };

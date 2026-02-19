@@ -13,9 +13,8 @@ var Simplifier = (function () {
     var result = {
       buildings: [],
       paths: [],
-      majorStreets: [],
-      streets: [],
-      entrances: filtered.entrances.slice() // Points — no simplification needed
+      streetLabels: filtered.streetLabels.slice(), // Points — pass through
+      entrances:    filtered.entrances.slice()     // Points — pass through
     };
 
     var stats = {
@@ -23,13 +22,11 @@ var Simplifier = (function () {
       after: 0,
       byLayer: {
         buildings: { before: 0, after: 0 },
-        paths: { before: 0, after: 0 },
-        majorStreets: { before: 0, after: 0 },
-        streets: { before: 0, after: 0 }
+        paths:     { before: 0, after: 0 }
       }
     };
 
-    ['buildings', 'paths', 'majorStreets', 'streets'].forEach(function (layerKey) {
+    ['buildings', 'paths'].forEach(function (layerKey) {
       filtered[layerKey].forEach(function (feature) {
         var beforeCount = countCoords(feature.geometry);
         stats.before += beforeCount;

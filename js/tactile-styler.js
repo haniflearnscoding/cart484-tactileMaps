@@ -50,27 +50,18 @@ var TactileStyler = (function () {
 
   function run(simplified) {
     var result = {
-      buildings: [],
-      paths: [],
-      majorStreets: [],
-      streets: [],
-      entrances: []
+      buildings:    [],
+      paths:        [],
+      streetLabels: simplified.streetLabels.slice(), // pass through as-is
+      entrances:    []
     };
 
     simplified.buildings.forEach(function (f) {
       result.buildings.push(attachSpec(f, 'building'));
     });
 
-    (simplified.majorStreets || []).forEach(function (f) {
-      result.majorStreets.push(attachSpec(f, 'majorStreet'));
-    });
-
     simplified.paths.forEach(function (f) {
       result.paths.push(attachSpec(f, 'path'));
-    });
-
-    simplified.streets.forEach(function (f) {
-      result.streets.push(attachSpec(f, 'street'));
     });
 
     simplified.entrances.forEach(function (f) {
