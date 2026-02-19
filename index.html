@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>cart484 — Tactile Map Pipeline</title>
+
+  <!-- Google Font: Source Code Pro for monospace UI elements -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;600&display=swap" rel="stylesheet">
+
+  <!-- Turf.js via CDN (Douglas-Peucker simplification) -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <!-- Pipeline stylesheet -->
+  <link rel="stylesheet" href="css/styles.css">
+
+  <!-- Data (loaded first — avoids file:// CORS restrictions) -->
+  <script src="data/sgw-campus-mock.js"></script>
+
+  <!-- Pipeline modules (order matters — loader before pipeline.js) -->
+  <script src="js/geojson-loader.js"></script>
+  <script src="js/layer-filter.js"></script>
+  <script src="js/simplify.js"></script>
+  <script src="js/tactile-styler.js"></script>
+  <script src="js/svg-renderer.js"></script>
+  <script src="js/svg-exporter.js"></script>
+  <script src="js/pipeline.js"></script>
+</head>
+<body>
+  <div id="app">
+
+    <!-- ======================================================
+         LEFT PANEL: Pipeline controls
+         ====================================================== -->
+    <aside id="panel">
+
+      <header id="panel-header">
+        <h1>Tactile Map Pipeline</h1>
+        <div class="subtitle">CART484 · SGW Campus · Concordia University</div>
+      </header>
+
+      <!-- Stage Cards -->
+      <div id="stages">
+
+        <!-- Stage 1: Load -->
+        <section class="stage" id="stage-1">
+          <div class="stage-header">
+            <div class="stage-badge">1</div>
+            <div class="stage-title">Load GeoJSON</div>
+            <button class="stage-run-btn" id="btn-stage-1">Run</button>
+          </div>
+          <div class="stage-body">
+            <div class="stage-desc">
+              Parse <code>SGW_CAMPUS_DATA</code> — validate FeatureCollection structure and count features per layer.
+            </div>
+            <div class="stage-meta" id="meta-1">Not yet run</div>
+          </div>
+        </section>
+
+        <!-- Stage 2: Filter -->
+        <section class="stage" id="stage-2">
+          <div class="stage-header">
+            <div class="stage-badge">2</div>
+            <div class="stage-title">Filter Layers</div>
+            <button class="stage-run-btn" id="btn-stage-2">Run</button>
+          </div>
+          <div class="stage-body">
+            <div class="stage-desc">
+              Split into buildings, pedestrian paths, streets, and extract entrance Points from building properties.
+            </div>
+            <div class="stage-meta" id="meta-2">Not yet run</div>
+          </div>
+        </section>
+
+        <!-- Stage 3: Simplify -->
+        <section class="stage" id="stage-3">
+          <div class="stage-header">
+            <div class="stage-badge">3</div>
+            <div class="stage-title">Simplify Geometry</div>
+            <button class="stage-run-btn" id="btn-stage-3">Run</button>
+          </div>
+          <div class="stage-body">
+            <div class="stage-desc">
+              Douglas-Peucker via Turf.js (<code>highQuality: true</code>) with pure-JS fallback. Converts metres → decimal degrees.
+            </div>
+            <div class="tolerance-row">
+              <label for="tolerance-slider">Tolerance:</label>
+              <input type="range" id="tolerance-slider" min="0.5" max="10" step="0.5" value="2">
+              <span id="tolerance-value">2m</span>
+            </div>
+            <div class="stage-meta" id="meta-3">Not yet run</div>
+          </div>
+        </section>
+
+        <!-- Stage 4: Style -->
+        <section class="stage" id="stage-4">
+          <div class="stage-header">
+            <div class="stage-badge">4</div>
+            <div class="stage-title">Apply Tactile Styles</div>
+            <button class="stage-run-btn" id="btn-stage-4">Run</button>
+          </div>
+          <div class="stage-body">
+            <div class="stage-desc">
+              Attach <code>_tactile_spec</code> to each feature — stroke widths, dash arrays, and radii per ProBlind Standard v4.
+            </div>
+            <div class="stage-meta" id="meta-4">Not yet run</div>
+          </div>
+        </section>
+
+        <!-- Stage 5: Render -->
+        <section class="stage" id="stage-5">
+          <div class="stage-header">
+            <div class="stage-badge">5</div>
+            <div class="stage-title">Render SVG</div>
+            <button class="stage-run-btn" id="btn-stage-5">Run</button>
+          </div>
+          <div class="stage-body">
+            <div class="stage-desc">
+              Project WGS84 coords → A4 SVG (297×210mm viewBox). Four layer groups: street grid → paths → buildings → entrances.
+            </div>
+            <div class="stage-meta" id="meta-5">Not yet run</div>
+          </div>
+        </section>
+
+      </div><!-- /#stages -->
+
+      <!-- Action buttons -->
+      <div id="actions">
+        <button class="btn-primary" id="btn-run-all">Run Full Pipeline</button>
+        <button class="btn-secondary" id="btn-export">Export SVG</button>
+      </div>
+
+      <!-- Log console -->
+      <div id="log-container">
+        <div id="log-header">
+          <span>Console</span>
+          <button id="log-clear-btn" onclick="document.getElementById('log-console').innerHTML = ''">Clear</button>
+        </div>
+        <div id="log-console"></div>
+      </div>
+
+    </aside><!-- /#panel -->
+
+    <!-- ======================================================
+         RIGHT CANVAS: SVG preview
+         ====================================================== -->
+    <main id="canvas">
+
+      <!-- Toolbar / legend -->
+      <div id="canvas-toolbar">
+        <span class="toolbar-label">Preview</span>
+
+        <span class="legend-item">
+          <span class="legend-swatch building"></span>
+          Buildings
+        </span>
+        <span class="legend-item">
+          <span class="legend-swatch major-street"></span>
+          Major streets
+        </span>
+        <span class="legend-item">
+          <span class="legend-swatch street"></span>
+          Minor streets
+        </span>
+        <span class="legend-item">
+          <span class="legend-swatch path"></span>
+          Pedestrian paths
+        </span>
+        <span class="legend-item">
+          <span class="legend-swatch entrance"></span>
+          Campus entrances
+        </span>
+      </div>
+
+      <!-- SVG viewport -->
+      <div id="canvas-viewport">
+        <div id="svg-canvas">
+          <div id="svg-placeholder">
+            <div class="placeholder-icon">⬡</div>
+            <p>Run the pipeline to generate the tactile map SVG</p>
+          </div>
+        </div>
+      </div>
+
+    </main><!-- /#canvas -->
+
+  </div><!-- /#app -->
+</body>
+</html>
